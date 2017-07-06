@@ -2,7 +2,6 @@ package: github.com/SprintHive/routed-service-controller
 import:
 - package: github.com/golang/glog
 - package: github.com/SprintHive/go-kong
-  version: sprinthive
   subpackages:
   - kong
 - package: github.com/pkg/errors

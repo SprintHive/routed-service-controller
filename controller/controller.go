@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/SprintHive/go-kong/kong"
 	"github.com/SprintHive/routed-service-controller/apis/routedservice/v1alpha1"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // LookupHost resolves a hostname to an array of IP Addresses
@@ -26,14 +26,16 @@ type RoutedServiceController struct {
 	RoutedServiceClient cache.Getter
 	KongClient          *kong.Client
 	LookupHost          LookupHost
+	Namespace           string
 }
 
 // New returns an instance of a RoutedServiceController
-func New(client cache.Getter, kongClient *kong.Client) *RoutedServiceController {
+func New(client cache.Getter, kongClient *kong.Client, namespace string) *RoutedServiceController {
 	return &RoutedServiceController{
 		client,
 		kongClient,
 		net.LookupHost,
+		namespace,
 	}
 }
 
@@ -45,7 +47,7 @@ var FullResyncInterval = time.Minute
 
 // Run starts the RoutedServiceController
 func (controller *RoutedServiceController) Run(ctx context.Context) error {
-	glog.Info("Starting watch for RoutedService updates")
+	glog.Infof("Starting watch for RoutedService updates in namespace '%s'", controller.Namespace)
 
 	_, err := controller.createWatches(ctx)
 	if err != nil {
@@ -67,7 +69,7 @@ func apiReaper(ctx context.Context, controller *RoutedServiceController) {
 		case <-ctx.Done():
 			return
 		default:
-			err := reapOrphanedApis(controller.KongClient, controller.RoutedServiceClient)
+			err := reapOrphanedApis(controller.KongClient, controller.RoutedServiceClient, controller.Namespace)
 			if err != nil {
 				glog.Errorf("Failed to reap orphaned kong apis: %v", err)
 			}
@@ -78,7 +80,7 @@ func apiReaper(ctx context.Context, controller *RoutedServiceController) {
 	}
 }
 
-func reapOrphanedApis(kongClient *kong.Client, routedServiceClient cache.Getter) error {
+func reapOrphanedApis(kongClient *kong.Client, routedServiceClient cache.Getter, namespace string) error {
 	kongApis, _, err := kongClient.Apis.GetAll(nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get kong api list")
@@ -86,7 +88,7 @@ func reapOrphanedApis(kongClient *kong.Client, routedServiceClient cache.Getter)
 
 	routedServiceObjects, err := routedServiceClient.
 		Get().
-		Namespace(v1.NamespaceAll).
+		Namespace(namespace).
 		Resource(v1alpha1.RoutedServicePlural).
 		Do().
 		Get()
@@ -118,12 +120,12 @@ func (controller *RoutedServiceController) createWatches(ctx context.Context) (c
 	watchedSource := cache.NewListWatchFromClient(
 		controller.RoutedServiceClient,
 		v1alpha1.RoutedServicePlural,
-		v1.NamespaceAll,
+		controller.Namespace,
 		fields.Everything())
 
 	_, informController := cache.NewInformer(
 		watchedSource,
-		&v1alpha1.RoutedService{},
+		&metav1.TypeMeta{},
 		FullResyncInterval,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    routedServiceChanged(controller.KongClient, controller.LookupHost),
@@ -196,7 +198,7 @@ func reconcileAPI(kongClient *kong.Client, routedService *v1alpha1.RoutedService
 			return errors.Wrapf(err, "Failed to create API '%s'", apiName)
 		}
 	} else {
-		_, correctUpstreamURL := getUpstreamURL(apiName)
+		correctUpstreamURL := getUpstreamURL(apiName)
 		if api.UpstreamURL != correctUpstreamURL {
 			glog.Infof("Updating upstream URL from '%s' to '%s' on API '%s'", api.UpstreamURL, correctUpstreamURL, api.Name)
 			_, err := kongClient.Apis.Patch(&kong.ApiRequest{
@@ -213,7 +215,7 @@ func reconcileAPI(kongClient *kong.Client, routedService *v1alpha1.RoutedService
 }
 
 func reconcileUpstream(kongClient *kong.Client, routedService *v1alpha1.RoutedService, lookupHost LookupHost) error {
-	upstreamName, _ := getUpstreamURL(routedService.ObjectMeta.Name)
+	upstreamName := routedService.ObjectMeta.Name
 	_, resp, err := kongClient.Upstreams.Get(upstreamName)
 	if err != nil && resp == nil {
 		return errors.Wrapf(err, "Failed to fetch upstream '%s'", upstreamName)
@@ -233,13 +235,13 @@ func reconcileUpstream(kongClient *kong.Client, routedService *v1alpha1.RoutedSe
 		}
 		glog.Infof("Created new upstream '%s'", upstreamName)
 
-		return createTargets(kongClient, upstreamName, &routedService.Spec.Backends)
+		return putTargets(kongClient, upstreamName, &routedService.Spec.Backends)
 	}
 
 	return updateTargets(kongClient, routedService, lookupHost)
 }
 
-func createTargets(kongClient *kong.Client, upstreamName string, backends *[]v1alpha1.Backend) error {
+func putTargets(kongClient *kong.Client, upstreamName string, backends *[]v1alpha1.Backend) error {
 	for _, backend := range *backends {
 
 		target := targetFromBackend(&backend)
@@ -265,10 +267,6 @@ func updateTargets(kongClient *kong.Client, routedService *v1alpha1.RoutedServic
 		backendMap[fmt.Sprintf("%s:%d", backend.Service, backend.Port)] = &routedService.Spec.Backends[index]
 	}
 
-	if err != nil {
-		return err
-	}
-
 	targetsToDelete := []*kong.Target{}
 	for _, target := range targets.Data {
 		if backend, ok := backendMap[target.Target]; ok {
@@ -283,12 +281,12 @@ func updateTargets(kongClient *kong.Client, routedService *v1alpha1.RoutedServic
 		}
 	}
 
-	// If there are any backends that have not yet been added, lets add them now
+	// Add or replace targets for the backends that were not already configured correctly
 	remainingBackends := []v1alpha1.Backend{}
 	for _, backend := range backendMap {
 		remainingBackends = append(remainingBackends, *backend)
 	}
-	createTargets(kongClient, upstreamName, &remainingBackends)
+	putTargets(kongClient, upstreamName, &remainingBackends)
 
 	// Cleanup the targets that are queued for deletion
 	for _, obsoleteTarget := range targetsToDelete {
@@ -358,7 +356,7 @@ func targetFromBackend(backend *v1alpha1.Backend) *kong.Target {
 
 func apiRequestFromRoutedService(routedService *v1alpha1.RoutedService) kong.ApiRequest {
 	serviceName := routedService.ObjectMeta.Name
-	_, upstreamURL := getUpstreamURL(serviceName)
+	upstreamURL := getUpstreamURL(serviceName)
 	return kong.ApiRequest{
 		UpstreamURL: upstreamURL,
 		Name:        serviceName,
@@ -366,8 +364,8 @@ func apiRequestFromRoutedService(routedService *v1alpha1.RoutedService) kong.Api
 	}
 }
 
-func getUpstreamURL(apiName string) (upstreamName string, upstreamURL string) {
-	return apiName, "http://" + apiName
+func getUpstreamURL(apiName string) string {
+	return "http://" + apiName
 }
 
 func getIPTarget(address string, lookupHost LookupHost) (string, error) {

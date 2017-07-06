@@ -8,7 +8,7 @@ import (
 )
 
 // CreateRoutedServiceResourceType creates a third party resource for RoutedServices
-func CreateRoutedServiceResourceType(clientset kubernetes.Interface) error {
+func CreateRoutedServiceResourceType(clientSet kubernetes.Interface) error {
 	resource := &v1beta1.ThirdPartyResource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "routed-service." + v1alpha1.GroupName,
@@ -19,6 +19,6 @@ func CreateRoutedServiceResourceType(clientset kubernetes.Interface) error {
 		Description: "A managed routed service that updates an API gateway to reflect the routed service resources",
 	}
 
-	_, err := clientset.ExtensionsV1beta1().ThirdPartyResources().Create(resource)
+	_, err := clientSet.ExtensionsV1beta1().ThirdPartyResources().Create(resource)
 	return err
 }

@@ -36,6 +36,9 @@ var (
 	opTimeout time.Duration
 
 	lookupHost = func(host string) ([]string, error) { return []string{"ip-" + host}, nil }
+
+	// Kubernetes namespace
+	namespace = "default"
 )
 
 type Payload struct {
@@ -223,7 +226,7 @@ func TestKongReconciledWithNewRoutedServices(t *testing.T) {
 	waitGroup.Add(1)
 	go testKongOperationCalledMultiple(t, fmt.Sprintf("/upstreams/%s/targets", sampleRS.ObjectMeta.Name), payloads, &waitGroup)
 
-	controller := RoutedServiceController{restClient, kongClient, nil}
+	controller := RoutedServiceController{restClient, kongClient, nil, namespace}
 	controller.LookupHost = lookupHost
 	ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*5)
 	controller.createWatches(ctx)
@@ -263,7 +266,7 @@ func TestKongReconciledWithUpdatedRoutedServices(t *testing.T) {
 	waitGroup.Add(1)
 	go testKongOperationCalled(t, fmt.Sprintf("/apis/%s", serviceName), http.MethodGet, nil, apiFromRS(&updatedRS), &waitGroup)
 
-	controller := RoutedServiceController{restClient, kongClient, nil}
+	controller := RoutedServiceController{restClient, kongClient, nil, namespace}
 	controller.LookupHost = lookupHost
 	ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*5)
 	controller.createWatches(ctx)
@@ -323,7 +326,7 @@ func TestKongReconciledWithDeletedRoutedServices(t *testing.T) {
 		t.Fatal("Could not create rest client")
 	}
 
-	controller := RoutedServiceController{restClient, kongClient, nil}
+	controller := RoutedServiceController{restClient, kongClient, nil, namespace}
 	ctx, _ := context.WithTimeout(context.Background(), time.Millisecond)
 	controller.Run(ctx)
 
@@ -347,7 +350,7 @@ func TestResilienceToKongUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal("Could not create mock REST client")
 	}
-	controller := RoutedServiceController{restClient, kongClient, nil}
+	controller := RoutedServiceController{restClient, kongClient, nil, namespace}
 	controller.LookupHost = lookupHost
 	ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*1100)
 
@@ -413,7 +416,7 @@ func testInvalidRS(t *testing.T, serviceName, invalidRS string) {
 	if err != nil {
 		t.Fatal("Failed to create rest client for malformed RoutedService")
 	}
-	controller := RoutedServiceController{restClient, kongClient, nil}
+	controller := RoutedServiceController{restClient, kongClient, nil, namespace}
 	controller.LookupHost = lookupHost
 
 	ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*600)
