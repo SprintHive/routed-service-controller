@@ -18,6 +18,7 @@ type RoutedService struct {
 
 // RoutedServiceSpec is the specification for a RoutedService
 type RoutedServiceSpec struct {
+	Hosts      string  `json:"hosts"`
 	Backends []Backend `json:"backends"`
 }
 

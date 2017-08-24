@@ -388,8 +388,6 @@ func TestResilienceToMalformedRoutedServiceSpec(t *testing.T) {
 
 	for _, testCase := range testCases {
 		malformedRS := strings.Replace(sampleRSJSON, testCase, "malformed_"+testCase, 1)
-		fmt.Printf(malformedRS)
-
 		testInvalidRS(t, serviceName, malformedRS)
 	}
 }
@@ -523,6 +521,7 @@ func sampleRoutedService(name string) v1alpha1.RoutedService {
 			Name: name,
 		},
 		Spec: v1alpha1.RoutedServiceSpec{
+			Hosts: name+".host.name",
 			Backends: []v1alpha1.Backend{
 				v1alpha1.Backend{
 					Service: "service-1",
@@ -570,7 +569,7 @@ func apiRequestFromRS(routedService *v1alpha1.RoutedService) kong.ApiRequest {
 	return kong.ApiRequest{
 		UpstreamURL: "http://" + routedService.ObjectMeta.Name,
 		Name:        routedService.ObjectMeta.Name,
-		Hosts:       routedService.ObjectMeta.Name,
+		Hosts:       routedService.Spec.Hosts,
 	}
 }
 

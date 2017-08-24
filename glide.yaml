@@ -1,6 +1,7 @@
 package: github.com/SprintHive/routed-service-controller
 import:
 - package: github.com/golang/glog
+- package: github.com/google/go-querystring
 - package: github.com/emicklei/go-restful
   version: 1.0.0
 - package: github.com/SprintHive/go-kong

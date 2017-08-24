@@ -355,11 +355,12 @@ func targetFromBackend(backend *v1alpha1.Backend) *kong.Target {
 
 func apiRequestFromRoutedService(routedService *v1alpha1.RoutedService) kong.ApiRequest {
 	serviceName := routedService.ObjectMeta.Name
+	hosts := routedService.Spec.Hosts
 	upstreamURL := getUpstreamURL(serviceName)
 	return kong.ApiRequest{
 		UpstreamURL: upstreamURL,
 		Name:        serviceName,
-		Hosts:       serviceName,
+		Hosts:       hosts,
 	}
 }
 
@@ -392,6 +393,9 @@ func getIPTarget(address string, lookupHost LookupHost) (string, error) {
 func validateRSWellFormed(routedService *v1alpha1.RoutedService) error {
 	if routedService.ObjectMeta.Name == "" {
 		return fmt.Errorf("Name is empty")
+	}
+	if routedService.Spec.Hosts == "" {
+		return fmt.Errorf("Spec.Hosts is empty")
 	}
 	if len(routedService.Spec.Backends) == 0 {
 		return fmt.Errorf("Spec.Backends is empty")
